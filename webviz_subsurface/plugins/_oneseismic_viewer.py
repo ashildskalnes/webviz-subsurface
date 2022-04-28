@@ -11,10 +11,17 @@ from webviz_config import WebvizPluginABC, WebvizSettings
 from webviz_config.utils import calculate_slider_step
 from webviz_config.webviz_store import webvizstore
 
-from .._datainput.seismic import get_iline, get_xline, get_zslice, load_cube_data
+from .._datainput.seismic import (
+    get_client,
+    seismic_data,
+    get_sas,
+    get_os_iline,
+    get_os_xline,
+    get_os_zslice,
+)
 
 
-class SegyViewer(WebvizPluginABC):
+class OneseismicViewer(WebvizPluginABC):
     """Inspired by [SegyViewer for Python](https://github.com/equinor/segyviewer) this plugin
 visualizes seismic 3D cubes with 3 plots (inline, crossline and zslice).
 The plots are linked and updates are done by clicking in the plots.
@@ -41,7 +48,7 @@ e.g. [xtgeo](https://xtgeo.readthedocs.io/en/latest/).
         self,
         app: Dash,
         webviz_settings: WebvizSettings,
-        segyfiles: List[Path],
+        os_files: List[str],
         zunit: str = "depth (m)",
         colors: list = None,
     ):
@@ -49,7 +56,14 @@ e.g. [xtgeo](https://xtgeo.readthedocs.io/en/latest/).
         super().__init__()
 
         self.zunit = zunit
-        self.segyfiles: List[str] = [str(segy) for segy in segyfiles]
+        self.seismic_files: List[str] = [str(oneseismic) for oneseismic in os_files]
+        self.seismic_data = seismic_data()
+        # print("self.seismic_data", self.seismic_data)
+        resource = "https://oneseismicdev.blob.core.windows.net"
+        seismic_name = self.seismic_files[0]
+        self.guid = self.seismic_data[seismic_name]
+        self.sas = get_sas(resource, self.guid)
+        print("sas", self.sas)
         self.initial_colors = (
             colors
             if colors
@@ -68,24 +82,40 @@ e.g. [xtgeo](https://xtgeo.readthedocs.io/en/latest/).
                 "#053061",
             ]
         )
-        self.init_state = self.update_state(self.segyfiles[0])
+
+        client = get_client()
+        meta = client.metadata(self.guid)(sas=self.sas)
+        ilines = meta["cube"]["linenumbers"][0]
+        xlines = meta["cube"]["linenumbers"][1]
+        zslices = meta["cube"]["linenumbers"][2]
+        zslices = np.array(list(map(int, zslices))) / 1000
+        zslices = [int(x) for x in zslices]
+
+        self.cube = {"ilines": ilines, "xlines": xlines, "zslices": zslices}
+        self.init_state = self.update_state(self.seismic_files[0])
         self.init_state.get("colorscale", self.initial_colors)
         self.init_state.get("uirevision", str(uuid4()))
 
         self.plotly_theme = webviz_settings.theme.plotly_theme
         self.set_callbacks(app)
 
-    def update_state(self, cubepath: str, **kwargs: Any) -> Dict[str, Any]:
-        cube = load_cube_data(get_path(cubepath))
+    def update_state(self, seismic_name: str, **kwargs: Any) -> Dict[str, Any]:
+        # print("update_state:"
         scaling = 600
         min_value = -scaling
         max_value = scaling
 
+        cube = self.cube
+        ilines = cube.get("ilines")
+        xlines = cube.get("xlines")
+        zslices = cube.get("zslices")
+
         state = {
-            "cubepath": cubepath,
-            "iline": int(cube.ilines[int(len(cube.ilines) / 2)]),
-            "xline": int(cube.xlines[int(len(cube.xlines) / 2)]),
-            "zslice": float(cube.zslices[int(len(cube.zslices) / 2)]),
+            "seismic_name": seismic_name,
+            "cube": cube,
+            "iline": int(ilines[int(len(ilines) / 2)]),
+            "xline": int(xlines[int(len(xlines) / 2)]),
+            "zslice": int(zslices[int(len(zslices) / 2)]),
             "min_value": float(f"{min_value:2f}"),
             "max_value": float(f"{max_value:2f}"),
             "color_min_value": min_value,
@@ -159,9 +189,9 @@ e.g. [xtgeo](https://xtgeo.readthedocs.io/en/latest/).
                         id=self.uuid("cube"),
                         options=[
                             {"label": Path(cube).stem, "value": cube}
-                            for cube in self.segyfiles
+                            for cube in self.seismic_files
                         ],
-                        value=self.segyfiles[0],
+                        value=self.seismic_files[0],
                         clearable=False,
                     ),
                 ),
@@ -272,7 +302,7 @@ e.g. [xtgeo](https://xtgeo.readthedocs.io/en/latest/).
             ],
         )
         def _update_state(
-            cubepath: str,
+            seismic_name: str,
             icd: Union[dict, None],
             xcd: Union[dict, None],
             zcd: Union[dict, None],
@@ -297,8 +327,8 @@ e.g. [xtgeo](https://xtgeo.readthedocs.io/en/latest/).
             z_was_clicked = (
                 zcd if zcd and ctx == f"{self.uuid('zslice')}.clickData" else None
             )
-            if ctx == f"{self.uuid('cube')}.value":
-                store = self.update_state(cubepath)
+            if ctx == f"{self.uuid('seismic_name')}.value":
+                store = self.update_state(seismic_name)
             if ctx == f"{self.uuid('zoom')}.n_clicks":
                 store["uirevision"] = str(uuid4())
             if x_was_clicked and xcd is not None:
@@ -329,33 +359,34 @@ e.g. [xtgeo](https://xtgeo.readthedocs.io/en/latest/).
             if not state_data_str:
                 raise PreventUpdate
             state = json.loads(state_data_str)
-            cube = load_cube_data(get_path(state["cubepath"]))
+            seismic_name = state["seismic_name"]
+            cube = self.cube
             shapes = [
                 {
                     "type": "line",
                     "x0": state["iline"],
-                    "y0": cube.xlines[0],
+                    "y0": cube.get("xlines")[0],
                     "x1": state["iline"],
-                    "y1": cube.xlines[-1],
+                    "y1": cube.get("xlines")[-1],
                     "line": {"width": 1, "dash": "dot"},
                 },
                 {
                     "type": "line",
                     "y0": state["xline"],
-                    "x0": cube.ilines[0],
+                    "x0": cube.get("ilines")[0],
                     "y1": state["xline"],
-                    "x1": cube.ilines[-1],
+                    "x1": cube.get("ilines")[-1],
                     "line": {"width": 1, "dash": "dot"},
                 },
             ]
 
-            zslice_arr = get_zslice(cube, state["zslice"])
+            zslice_arr = get_os_zslice(self.sas, seismic_name, state["zslice"])
 
             fig = make_heatmap(
                 zslice_arr,
                 self.plotly_theme,
-                xaxis=cube.ilines,
-                yaxis=cube.xlines,
+                xaxis=cube.get("ilines"),
+                yaxis=cube.get("xlines"),
                 showscale=True,
                 text=str(state["zslice"]),
                 title=f'Zslice {state["zslice"]} ({self.zunit})',
@@ -382,32 +413,34 @@ e.g. [xtgeo](https://xtgeo.readthedocs.io/en/latest/).
             if not state_data_str:
                 raise PreventUpdate
             state = json.loads(state_data_str)
-            cube = load_cube_data(get_path(state["cubepath"]))
+            seismic_name = state["seismic_name"]
+            cube = self.cube
+
             shapes = [
                 {
                     "type": "line",
                     "x0": state["xline"],
-                    "y0": cube.zslices[0],
+                    "y0": cube.get("zslices")[0],
                     "x1": state["xline"],
-                    "y1": cube.zslices[-1],
+                    "y1": cube.get("zslices")[-1],
                     "line": {"width": 1, "dash": "dot"},
                 },
                 {
                     "type": "line",
-                    "x0": cube.xlines[0],
+                    "x0": cube.get("xlines")[0],
                     "y0": state["zslice"],
-                    "x1": cube.xlines[-1],
+                    "x1": cube.get("xlines")[-1],
                     "y1": state["zslice"],
                     "line": {"width": 1, "dash": "dot"},
                 },
             ]
-            iline_arr = get_iline(cube, state["iline"])
+            iline_arr = get_os_iline(self.sas, seismic_name, state["iline"])
 
             fig = make_heatmap(
                 iline_arr,
                 self.plotly_theme,
-                xaxis=cube.xlines,
-                yaxis=cube.zslices,
+                xaxis=cube.get("xlines"),
+                yaxis=cube.get("zslices"),
                 title=f'Inline {state["iline"]}',
                 xaxis_title="Crossline",
                 yaxis_title=self.zunit,
@@ -430,31 +463,32 @@ e.g. [xtgeo](https://xtgeo.readthedocs.io/en/latest/).
             if not state_data_str:
                 raise PreventUpdate
             state = json.loads(state_data_str)
-            cube = load_cube_data(get_path(state["cubepath"]))
+            seismic_name = state["seismic_name"]
+            cube = self.cube
             shapes = [
                 {
                     "type": "line",
                     "x0": state["iline"],
-                    "y0": cube.zslices[0],
+                    "y0": cube.get("zslices")[0],
                     "x1": state["iline"],
-                    "y1": cube.zslices[-1],
+                    "y1": cube.get("zslices")[-1],
                     "line": {"width": 1, "dash": "dot"},
                 },
                 {
                     "type": "line",
-                    "x0": cube.ilines[0],
+                    "x0": cube.get("ilines")[0],
                     "y0": state["zslice"],
-                    "x1": cube.ilines[-1],
+                    "x1": cube.get("ilines")[-1],
                     "y1": state["zslice"],
                     "line": {"width": 1, "dash": "dot"},
                 },
             ]
-            xline_arr = get_xline(cube, state["xline"])
+            xline_arr = get_os_xline(self.sas, seismic_name, state["xline"])
             fig = make_heatmap(
                 xline_arr,
                 self.plotly_theme,
-                xaxis=cube.ilines,
-                yaxis=cube.zslices,
+                xaxis=cube.get("ilines"),
+                yaxis=cube.get("zslices"),
                 reverse_x=False,
                 reverse_y=True,
                 title=f'Crossline {state["xline"]}',

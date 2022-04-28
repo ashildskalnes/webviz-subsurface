@@ -49,6 +49,7 @@ from ._reservoir_simulation_timeseries_regional import (
 from ._rft_plotter import RftPlotter
 from ._running_time_analysis_fmu import RunningTimeAnalysisFMU
 from ._segy_viewer import SegyViewer
+from ._oneseismic_viewer import OneseismicViewer
 from ._seismic_misfit import SeismicMisfit
 from ._simulation_time_series import SimulationTimeSeries
 from ._structural_uncertainty import StructuralUncertainty

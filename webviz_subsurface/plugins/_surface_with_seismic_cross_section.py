@@ -330,6 +330,8 @@ e.g. [xtgeo](https://xtgeo.readthedocs.io/en/latest/).
                 raise PreventUpdate
             cube = load_cube_data(get_path(cubepath))
             fence = get_fencespec(coords)
+            print("coords", coords)
+            print("fence", fence)
             hmin, hmax, vmin, vmax, values = cube.get_randomline(fence)
 
             surface = xtgeo.surface_from_file(get_path(surfacepath))
@@ -365,6 +367,8 @@ e.g. [xtgeo](https://xtgeo.readthedocs.io/en/latest/).
             cube = load_cube_data(get_path(cubepath))
             minv = float(f"{cube.values.min():2f}")
             maxv = float(f"{cube.values.max():2f}")
+            minv = -800
+            maxv = 800
             value = [minv, maxv]
             step = calculate_slider_step(minv, maxv, steps=100)
             return minv, maxv, value, step
@@ -404,6 +408,8 @@ def make_heatmap(
         if colorscale
         else "RdBu"
     )
+
+    print("arr", arr)
 
     layout = {}
     layout.update(theme["layout"])
