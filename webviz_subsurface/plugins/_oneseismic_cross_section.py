@@ -14,11 +14,16 @@ from webviz_subsurface_components import LeafletMap
 
 from webviz_subsurface._models import SurfaceLeafletModel
 
-from .._datainput.seismic import load_cube_data
 from .._datainput.surface import get_surface_fence
+from .._datainput.seismic import (
+    get_client,
+    seismic_data,
+    get_sas,
+    get_os_fence,
+)
 
 
-class SurfaceWithSeismicCrossSection(WebvizPluginABC):
+class OneseismicCrossSection(WebvizPluginABC):
     """Visualizes surfaces in a map view and seismic in a cross section view.
 The cross section is defined by a polyline interactively edited in the map view.
 
@@ -57,7 +62,7 @@ e.g. [xtgeo](https://xtgeo.readthedocs.io/en/latest/).
         self,
         app,
         webviz_settings: WebvizSettings,
-        segyfiles: List[Path],
+        os_files: List[str],
         surfacefiles: List[Path],
         surfacenames: list = None,
         segynames: list = None,
@@ -67,7 +72,13 @@ e.g. [xtgeo](https://xtgeo.readthedocs.io/en/latest/).
 
         super().__init__()
         self.zunit = zunit
-        self.segyfiles = [str(segyfile) for segyfile in segyfiles]
+        self.seismic_files: List[str] = [str(oneseismic) for oneseismic in os_files]
+        self.seismic_data = seismic_data()
+        # print("self.seismic_data", self.seismic_data)
+        resource = "https://oneseismicdev.blob.core.windows.net"
+        self.seismic_name = self.seismic_files[0]
+        self.guid = self.seismic_data[self.seismic_name]
+        self.sas = get_sas(resource, self.guid)
         self.surfacefiles = [str(surffile) for surffile in surfacefiles]
         if surfacenames is not None:
             if len(surfacenames) != len(surfacefiles):
@@ -77,14 +88,8 @@ e.g. [xtgeo](https://xtgeo.readthedocs.io/en/latest/).
             self.surfacenames = surfacenames
         else:
             self.surfacenames = [Path(surfacefile).stem for surfacefile in surfacefiles]
-        if segynames is not None:
-            if len(segynames) != len(segyfiles):
-                raise ValueError(
-                    "List of surface names specified should be same length as list of segyfiles"
-                )
-            self.segynames = segynames
-        else:
-            self.segynames = [Path(segyfile).stem for segyfile in segyfiles]
+        self.client = get_client()
+        self.meta = self.client.metadata(self.guid)(sas=self.sas)
         self.plotly_theme = webviz_settings.theme.plotly_theme
         self.initial_colors = (
             colors
@@ -212,9 +217,9 @@ e.g. [xtgeo](https://xtgeo.readthedocs.io/en/latest/).
                                     id=self.ids("cube"),
                                     options=[
                                         {"label": Path(cube).stem, "value": cube}
-                                        for cube in self.segyfiles
+                                        for cube in self.seismic_files
                                     ],
-                                    value=self.segyfiles[0],
+                                    value=self.seismic_files[0],
                                     clearable=False,
                                 ),
                                 wcc.Label(
@@ -300,11 +305,11 @@ e.g. [xtgeo](https://xtgeo.readthedocs.io/en/latest/).
             surface = xtgeo.surface_from_file(get_path(surfacepath))
             min_val = None
             max_val = None
-            if surface_type == "attribute":
-                min_val = color_values[0] if color_values else None
-                max_val = color_values[1] if color_values else None
-                cube = load_cube_data(get_path(cubepath))
-                surface.slice_cube(cube)
+            # if surface_type == "attribute":
+            #     min_val = color_values[0] if color_values else None
+            #     max_val = color_values[1] if color_values else None
+            #     cube = load_cube_data(get_path(cubepath))
+            #     surface.slice_cube(cube)
             return [
                 SurfaceLeafletModel(
                     surface,
@@ -328,17 +333,25 @@ e.g. [xtgeo](https://xtgeo.readthedocs.io/en/latest/).
         def _render_fence(coords, cubepath, surfacepath, color_values, colorscale):
             if not coords:
                 raise PreventUpdate
-            cube = load_cube_data(get_path(cubepath))
+
+            cube = self.seismic_name
             coords = [[6526272.0, 471102.8], [6519392, 474593.52]]
-            fence = get_fencespec(coords)
+            fence = get_fencespec(coords, 20)
+            print("render_fence")
             print("coords", coords)
-            hmin, hmax, vmin, vmax, values = cube.get_randomline(fence)
-            print("hmin, hmax, vmin, vmax", hmin, hmax, vmin, vmax)
+            print("fence", fence)
+            hmin, hmax, vmin, vmax, values = get_os_fence(
+                self.client, self.sas, self.seismic_data, cube, fence
+            )
+            print("coords", coords)
+            print("os_fence", fence)
+            print("values", values)
+            # hmin, hmax, vmin, vmax, values = cube.get_randomline(fence)
 
             surface = xtgeo.surface_from_file(get_path(surfacepath))
             s_arr = get_surface_fence(fence, surface)
             return make_heatmap(
-                values,
+                values.data,
                 s_arr=s_arr,
                 theme=self.plotly_theme,
                 s_name=self.surfacenames[self.surfacefiles.index(surfacepath)],
@@ -365,9 +378,9 @@ e.g. [xtgeo](https://xtgeo.readthedocs.io/en/latest/).
         )
         def _update_color_slider(_clicks, cubepath):
 
-            cube = load_cube_data(get_path(cubepath))
-            minv = float(f"{cube.values.min():2f}")
-            maxv = float(f"{cube.values.max():2f}")
+            # cube = load_cube_data(get_path(cubepath))
+            # minv = float(f"{cube.values.min():2f}")
+            # maxv = float(f"{cube.values.max():2f}")
             minv = -800
             maxv = 800
             value = [minv, maxv]
@@ -461,7 +474,7 @@ def get_path(path) -> Path:
     return Path(path)
 
 
-def get_fencespec(coords):
+def get_fencespec(coords, distance):
     """Create a XTGeo fence spec from polyline coordinates"""
     poly = xtgeo.Polygons()
     poly.dataframe = pd.DataFrame(
@@ -476,4 +489,4 @@ def get_fencespec(coords):
             for c in coords
         ]
     )
-    return poly.get_fence(asnumpy=True)
+    return poly.get_fence(distance=distance, asnumpy=True)

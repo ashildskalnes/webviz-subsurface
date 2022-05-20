@@ -1,0 +1,26 @@
+#!/bin/bash 
+#set -x
+
+if [ -d "venv" ]; then 
+    rm -rf venv 
+fi
+
+python -m venv venv
+source ./venv/bin/activate
+
+echo "Installing all necessary packages ..."
+
+pip install --upgrade pip
+pip install libecl 
+pip install webviz-config
+pip install webviz-config-equinor
+pip install oneseismic
+pip install azure-storage-blob
+pip install azure-identity
+pip install requests
+pip install requests-toolbelt
+pip install black
+pip install -e .
+
+echo "Re-installation completed"
+

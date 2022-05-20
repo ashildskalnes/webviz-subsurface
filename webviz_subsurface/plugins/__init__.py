@@ -51,6 +51,7 @@ from ._rft_plotter import RftPlotter
 from ._running_time_analysis_fmu import RunningTimeAnalysisFMU
 from ._segy_viewer import SegyViewer
 from ._oneseismic_viewer import OneseismicViewer
+from ._oneseismic_cross_section import OneseismicCrossSection
 from ._seismic_misfit import SeismicMisfit
 from ._simulation_time_series import SimulationTimeSeries
 from ._structural_uncertainty import StructuralUncertainty
