@@ -83,6 +83,7 @@ setup(
         "console_scripts": ["smry2arrow_batch=webviz_subsurface.smry2arrow_batch:main"],
     },
     install_requires=[
+        "flask-caching<1.11",  # https://github.com/equinor/webviz-subsurface/issues/1043
         "dash>=2.0.0",
         "dash_bootstrap_components>=0.10.3",
         "dash-daq>=0.5.0",
@@ -97,13 +98,12 @@ setup(
         "pandas>=1.1.5",
         "pillow>=6.1",
         "pyarrow>=5.0.0",
-        "pydeck>=0.6.2",
         "pyscal>=0.7.5",
         "scipy>=1.2",
         "statsmodels>=0.12.1",  # indirect dependency through https://plotly.com/python/linear-fits/
         "webviz-config>=0.3.8",
         "webviz-core-components>=0.5.6",
-        "webviz-subsurface-components>=0.4.11",
+        "webviz-subsurface-components>=0.4.12",
         "xtgeo>=2.14",
     ],
     extras_require={"tests": TESTS_REQUIRE},
